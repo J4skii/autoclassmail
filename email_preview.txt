@@ -1,0 +1,54 @@
+
+PRAETO DAILY TASK DIGEST
+Thursday, 26 March 2026
+
+SUMMARY
+-------
+Total Tasks: 2
+Claims: 1
+Quotes: 1
+Policy Servicing: 0
+Follow-ups: 0
+Files with Attachments: 0
+
+TASKS BY TYPE
+=============
+    
+CLAIMS (1)
+======
+
+Client: John Smith
+----------------------------------------
+
+1. Claim - John Smith - Vehicle accident on N1
+   Type: CLAIMS
+   Policy: POL-2024-00445
+   Summary: Vehicle accident on N1, vehicle damaged.
+   Assigned to: rep1
+   Files: /Praeto/AutomationTasks/Claims/John Smith/
+
+
+QUOTES (1)
+======
+
+Client: Mary Adams
+----------------------------------------
+
+1. Quote request - Mary Adams - Life cover R1M
+   Type: QUOTES
+   Policy: -
+   Summary: Life insurance quote. Age 35, income R45k, cover R1M
+   Assigned to: rep1
+   Files: /Praeto/AutomationTasks/Quotes/Mary Adams/
+
+
+INSTRUCTIONS
+============
+Copy the task details above and paste into Skye CRM.
+
+NEXT DIGEST
+===========
+Tomorrow at 16:15 SAST
+
+Questions? Reply to this email.
+    

@@ -1,0 +1,263 @@
+{
+  "system": {
+    "name": "Praeto Task Automation System - Email Digest Edition",
+    "version": "2.0",
+    "lastUpdated": "2026-03-24",
+    "timezone": "Africa/Johannesburg",
+    "deliveryMethod": "email",
+    "emailFormat": "html"
+  },
+  "monitored_inboxes": [
+    {
+      "email": "admin6@praeto.co.za",
+      "label": "Admin 6 Inbox",
+      "active": true,
+      "description": "Task emails received by Admin 6",
+      "monitoredBy": ["admin6@praeto.co.za"]
+    }
+  ],
+  "admin_team": [
+    {
+      "id": "admin1",
+      "name": "Admin 6",
+      "email": "admin6@praeto.co.za",
+      "digestTime": "16:15",
+      "digestFrequency": "daily",
+      "timezone": "Africa/Johannesburg",
+      "receiveUrgentAlerts": true,
+      "groupBy": ["taskType", "clientName"],
+      "emailTemplate": "professional",
+      "active": true,
+      "monitoredInboxes": ["admin6@praeto.co.za"]
+    }
+  ],
+  "email_settings": {
+    "senderEmail": "praeto-automation@praeto.co.za",
+    "senderName": "Praeto Task Automation",
+    "digestSubjectTemplate": "Praeto Daily Task Digest - {date}",
+    "urgentAlertSubjectTemplate": "🚨 Urgent Task Alert - {taskType} from {clientName}",
+    "timezone": "Africa/Johannesburg",
+    "emailTemplate": "professional_corporate",
+    "retryOnFailure": true,
+    "maxRetries": 3
+  },
+  "sales_representatives": [
+    {
+      "id": "rep1",
+      "name": "Rep 1",
+      "email": "rep1@praeto.co.za",
+      "role": "Sales Representative",
+      "active": true
+    },
+    {
+      "id": "rep2",
+      "name": "Rep 2",
+      "email": "rep2@praeto.co.za",
+      "role": "Sales Representative",
+      "active": true
+    }
+  ],
+  "task_categories": {
+    "claim": {
+      "name": "Claim",
+      "keywords": ["claim", "accident", "incident", "damage", "loss", "claim number", "clm"],
+      "priority": "urgent",
+      "icon": "🚨",
+      "color": "#E24B4A",
+      "emailColor": "#E24B4A"
+    },
+    "quote": {
+      "name": "Quote",
+      "keywords": ["quote", "quotation", "quote request", "cover needed", "premium"],
+      "priority": "high",
+      "icon": "📋",
+      "color": "#EF9F27",
+      "emailColor": "#EF9F27"
+    },
+    "servicing": {
+      "name": "Policy Servicing",
+      "keywords": ["cancel", "update", "change", "amend", "modify", "banking details", "driver", "address"],
+      "priority": "normal",
+      "icon": "🔧",
+      "color": "#639922",
+      "emailColor": "#639922"
+    },
+    "followup": {
+      "name": "Follow-up",
+      "keywords": ["call", "contact", "callback", "follow up", "advice", "consultation"],
+      "priority": "normal",
+      "icon": "📞",
+      "color": "#378ADD",
+      "emailColor": "#378ADD"
+    }
+  },
+  "onedrive_structure": {
+    "baseFolder": "/Praeto/AutomationTasks",
+    "folders": {
+      "claims": "/Praeto/AutomationTasks/Claims",
+      "quotes": "/Praeto/AutomationTasks/Quotes",
+      "policies": "/Praeto/AutomationTasks/Policies",
+      "followups": "/Praeto/AutomationTasks/FollowUps",
+      "archived": "/Praeto/AutomationTasks/Archive"
+    },
+    "createStructureOnFirstRun": true
+  },
+  "skye_crm_fields": [
+    "taskType",
+    "clientName",
+    "policyNumber",
+    "productType",
+    "claimReference",
+    "description",
+    "assignedRep",
+    "deadline",
+    "attachments"
+  ],
+  "extraction_rules": {
+    "clientNamePatterns": [
+      "from: (.+?)\\b(?:email|phone|regarding)",
+      "client:? ?(.+?)\\n",
+      "dear (.+?)(?:,|\\n)",
+      "(?:Claim|Quote|Request)\\s*-\\s*([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)"
+    ],
+    "policyNumberPatterns": [
+      "(?:policy|pol|policy #|policy number):? ?([A-Z0-9\\-]+)",
+      "\\b([A-Z]{3}\\-\\d{4}\\-\\d{5})\\b",
+      "POL[A-Z0-9]{6,10}"
+    ],
+    "claimReferencePatterns": [
+      "(?:claim|claim #|claim number|claim reference):? ?([A-Z0-9\\-]+)",
+      "\\bCLM\\-\\d{4}\\-\\d{4}\\b",
+      "CLM[A-Z0-9]{6,8}"
+    ]
+  },
+  "email_digest_settings": {
+    "enabled": true,
+    "groupingOrder": ["taskType", "clientName"],
+    "taskTypeOrder": ["claim", "quote", "servicing", "followup"],
+    "includeSummaryStats": true,
+    "includeSkyCrmReady": true,
+    "includeOneDrivePaths": true,
+    "htmlTemplate": "professional_corporate",
+    "plainTextFallback": true
+  },
+  "automation_settings": {
+    "enableRealTimeProcessing": true,
+    "enableFileAutoSave": true,
+    "enableAttachmentProcessing": true,
+    "enableEmailDigests": true,
+    "enableUrgentAlerts": true,
+    "maxAttachmentSize": 50000000,
+    "attachmentFormats": ["pdf", "jpg", "jpeg", "png", "docx", "xlsx", "msg"],
+    "autoAssignRules": {
+      "enabled": true,
+      "assignByEmailSender": true,
+      "assignByClientName": true,
+      "defaultAssignee": "admin6@praeto.co.za"
+    },
+    "digestDelivery": {
+      "enabled": true,
+      "method": "email",
+      "timeZone": "Africa/Johannesburg",
+      "retryOnFailure": true,
+      "maxRetries": 3
+    }
+  },
+  "logging": {
+    "enabled": true,
+    "level": "info",
+    "logEmailsSent": true,
+    "logFailedDeliveries": true,
+    "retentionDays": 90
+  },
+  "task_assignment_logic": {
+    "rules": [
+      {
+        "priority": 1,
+        "rule": "explicit_mention",
+        "description": "If email explicitly assigns to someone"
+      },
+      {
+        "priority": 2,
+        "rule": "sender_domain_match",
+        "description": "If email from known rep, assign to that rep"
+      },
+      {
+        "priority": 3,
+        "rule": "client_affinity",
+        "description": "If client has history with a rep, assign to them"
+      },
+      {
+        "priority": 4,
+        "rule": "keyword_matching",
+        "description": "If mentions specific rep or team"
+      },
+      {
+        "priority": 5,
+        "rule": "default_assignment",
+        "description": "Assign to primary admin for routing"
+      }
+    ],
+    "defaultAssignee": "admin6@praeto.co.za"
+  },
+  "email_templates": {
+    "professional_corporate": {
+      "headerBackground": "linear-gradient(135deg, #1e5a7a 0%, #2a7ba8 100%)",
+      "headerTextColor": "#ffffff",
+      "statsBackground": "#f9f9f9",
+      "taskCardBackground": "#fafafa",
+      "accentColor": "#1e5a7a",
+      "fontFamily": "Segoe UI, Tahoma, Geneva, Verdana, sans-serif",
+      "fontSize": "14px",
+      "lineHeight": "1.6"
+    }
+  },
+  "integrations": {
+    "outlook": {
+      "enabled": true,
+      "readEmails": true,
+      "sendEmails": true,
+      "createFolders": false
+    },
+    "onedrive": {
+      "enabled": true,
+      "autoCreateFolders": true,
+      "autoSaveAttachments": true
+    },
+    "skye_crm": {
+      "enabled": true,
+      "api": "not_available",
+      "method": "manual_copy_paste"
+    }
+  },
+  "notifications": {
+    "emailDigests": {
+      "enabled": true,
+      "sendAtTime": "16:15",
+      "timezone": "Africa/Johannesburg"
+    },
+    "urgentAlerts": {
+      "enabled": true,
+      "deliveryMethod": "email",
+      "priorityTasks": ["claim"]
+    },
+    "failureNotifications": {
+      "enabled": true,
+      "notifyAdminOnError": true
+    }
+  },
+  "maintenance": {
+    "archiveOldTasks": {
+      "enabled": true,
+      "archiveAfterDays": 60
+    },
+    "cleanupAttachments": {
+      "enabled": true,
+      "cleanupAfterDays": 90
+    },
+    "generateReports": {
+      "enabled": true,
+      "frequency": "weekly"
+    }
+  }
+}
