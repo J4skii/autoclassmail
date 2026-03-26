@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Praeto Email Automation - Process Map</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #f0f4f8;
+    padding: 40px 20px;
+    color: #222;
+  }
+
+  h1 {
+    text-align: center;
+    color: #1e5a7a;
+    font-size: 22px;
+    margin-bottom: 6px;
+    letter-spacing: 0.5px;
+  }
+
+  .subtitle {
+    text-align: center;
+    color: #888;
+    font-size: 13px;
+    margin-bottom: 40px;
+  }
+
+  .map {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    max-width: 780px;
+    margin: 0 auto;
+  }
+
+  /* ── Generic node ── */
+  .node {
+    border-radius: 10px;
+    padding: 14px 24px;
+    text-align: center;
+    position: relative;
+    width: 380px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+  }
+
+  .node .label {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    margin-bottom: 4px;
+  }
+
+  .node .detail {
+    font-size: 12px;
+    opacity: 0.85;
+    line-height: 1.5;
+  }
+
+  /* ── Colours ── */
+  .blue   { background: #1e5a7a; color: #fff; }
+  .teal   { background: #2a7ba8; color: #fff; }
+  .slate  { background: #334e68; color: #fff; }
+  .green  { background: #2d7a4f; color: #fff; }
+  .orange { background: #b85c00; color: #fff; }
+  .grey   { background: #e4e9ef; color: #334e68; }
+  .light  { background: #fff; color: #334e68; border: 2px solid #c8d6e5; }
+
+  /* ── Arrow ── */
+  .arrow {
+    width: 2px;
+    height: 28px;
+    background: #9ab3c8;
+    position: relative;
+    margin: 0 auto;
+  }
+  .arrow::after {
+    content: '';
+    position: absolute;
+    bottom: -6px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid #9ab3c8;
+  }
+
+  /* ── Arrow label ── */
+  .arrow-label {
+    font-size: 11px;
+    color: #888;
+    text-align: center;
+    margin: -6px 0 2px;
+    letter-spacing: 0.3px;
+  }
+
+  /* ── Branch row ── */
+  .branch-row {
+    display: flex;
+    justify-content: center;
+    gap: 14px;
+    width: 100%;
+    max-width: 780px;
+  }
+
+  .branch-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .branch-node {
+    border-radius: 10px;
+    padding: 12px 16px;
+    text-align: center;
+    width: 168px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+  }
+
+  .branch-node .icon { font-size: 20px; margin-bottom: 4px; }
+  .branch-node .b-label { font-size: 12px; font-weight: 700; text-transform: uppercase; }
+  .branch-node .b-detail { font-size: 11px; opacity: 0.85; margin-top: 3px; }
+
+  .bn-claim    { background: #E24B4A; color: #fff; }
+  .bn-quote    { background: #EF9F27; color: #fff; }
+  .bn-service  { background: #639922; color: #fff; }
+  .bn-followup { background: #378ADD; color: #fff; }
+
+  /* ── Horizontal connector ── */
+  .h-connector {
+    height: 2px;
+    background: #9ab3c8;
+    width: 700px;
+    max-width: 90vw;
+    margin: 0 auto;
+    position: relative;
+  }
+
+  .h-connector::before,
+  .h-connector::after {
+    content: '';
+    position: absolute;
+    top: -5px;
+    width: 2px;
+    height: 12px;
+    background: #9ab3c8;
+  }
+  .h-connector::before { left: 11.5%; }
+  .h-connector::after  { right: 11.5%; }
+
+  /* ── Section label ── */
+  .section-badge {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #aaa;
+    margin: 18px 0 4px;
+    text-align: center;
+  }
+
+  /* ── File box ── */
+  .file-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #fff;
+    border: 2px dashed #b0c4d8;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-size: 12px;
+    color: #555;
+    width: 380px;
+  }
+  .file-box .file-icon { font-size: 22px; }
+
+  /* ── Legend ── */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 16px;
+    margin-top: 48px;
+    font-size: 12px;
+    color: #555;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ── Mode row ── */
+  .mode-row {
+    display: flex;
+    gap: 14px;
+    justify-content: center;
+    margin-top: 4px;
+  }
+  .mode-box {
+    background: #fff;
+    border: 2px solid #c8d6e5;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 12px;
+    text-align: center;
+    color: #334e68;
+    width: 182px;
+  }
+  .mode-box .mode-title { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+
+  .daemon-badge {
+    display: inline-block;
+    background: #1e5a7a;
+    color: white;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 20px;
+    letter-spacing: 0.5px;
+  }
+
+</style>
+</head>
+<body>
+
+<h1>Praeto Email Automation — Process Map</h1>
+<p class="subtitle">System: autoclassmail &nbsp;·&nbsp; mail.praeto.co.za &nbsp;·&nbsp; Node.js / IMAP / SMTP</p>
+
+<div class="map">
+
+  <!-- TRIGGER -->
+  <div class="section-badge">Trigger</div>
+  <div class="mode-row">
+    <div class="mode-box">
+      <div class="mode-title">One-shot</div>
+      <code style="font-size:11px">node main.js</code>
+      <div style="margin-top:4px;color:#888;font-size:11px">Run once manually</div>
+    </div>
+    <div class="mode-box">
+      <div class="mode-title">Daemon <span class="daemon-badge">SERVICE</span></div>
+      <code style="font-size:11px">node main.js --daemon</code>
+      <div style="margin-top:4px;color:#888;font-size:11px">Checks every 5 min via PM2</div>
+    </div>
+  </div>
+
+  <div class="arrow"></div>
+
+  <!-- IMAP CONNECT -->
+  <div class="section-badge">Step 1 — Connect</div>
+  <div class="node blue">
+    <div class="label">📡 IMAP Connection</div>
+    <div class="detail">mail.praeto.co.za : 993 (TLS)<br>jaden@praeto.co.za</div>
+  </div>
+
+  <div class="arrow"></div>
+
+  <!-- SEARCH -->
+  <div class="node teal">
+    <div class="label">🔍 Search UNSEEN Emails</div>
+    <div class="detail">Fetches only unread messages · marks them as read</div>
+  </div>
+
+  <div class="arrow"></div>
+  <div class="arrow-label">emails found?</div>
+
+  <!-- DECISION -->
+  <div class="node light" style="width:280px; border-color:#f0a500;">
+    <div class="label" style="color:#b85c00;">⚡ Any new emails?</div>
+    <div class="detail" style="display:flex; justify-content:space-around; margin-top:6px;">
+      <span style="color:#2d7a4f; font-weight:700;">✔ YES → continue</span>
+      <span style="color:#999;">✘ NO → exit quietly</span>
+    </div>
+  </div>
+
+  <div class="arrow"></div>
+
+  <!-- CATEGORISE -->
+  <div class="section-badge">Step 2 — Categorise</div>
+  <div class="node slate">
+    <div class="label">🏷 Keyword Categorisation</div>
+    <div class="detail">Scans subject + body against config keywords</div>
+  </div>
+
+  <!-- horizontal line to branches -->
+  <div style="height:20px; width:2px; background:#9ab3c8; margin: 0 auto;"></div>
+  <div class="h-connector"></div>
+
+  <!-- 4 category branches -->
+  <div class="branch-row">
+    <div class="branch-col">
+      <div class="branch-node bn-claim">
+        <div class="icon">🚨</div>
+        <div class="b-label">Claim</div>
+        <div class="b-detail">claim, accident,<br>damage, loss</div>
+      </div>
+    </div>
+    <div class="branch-col">
+      <div class="branch-node bn-quote">
+        <div class="icon">📋</div>
+        <div class="b-label">Quote</div>
+        <div class="b-detail">quote, premium,<br>cover needed</div>
+      </div>
+    </div>
+    <div class="branch-col">
+      <div class="branch-node bn-service">
+        <div class="icon">🔧</div>
+        <div class="b-label">Servicing</div>
+        <div class="b-detail">cancel, amend,<br>banking details</div>
+      </div>
+    </div>
+    <div class="branch-col">
+      <div class="branch-node bn-followup">
+        <div class="icon">📞</div>
+        <div class="b-label">Follow-up</div>
+        <div class="b-detail">call, callback,<br>advice (default)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- merge back -->
+  <div class="h-connector" style="margin-top:0;"></div>
+  <div style="height:20px; width:2px; background:#9ab3c8; margin: 0 auto;"></div>
+
+  <!-- EXTRACT -->
+  <div class="section-badge">Step 3 — Extract</div>
+  <div class="node slate">
+    <div class="label">🔎 Data Extraction</div>
+    <div class="detail">
+      Client Name &nbsp;·&nbsp; Policy Number &nbsp;·&nbsp; Claim Reference<br>
+      Email description (first 200 chars) &nbsp;·&nbsp; Assigned Rep
+    </div>
+  </div>
+
+  <div class="arrow"></div>
+
+  <!-- BUILD TASK -->
+  <div class="node teal">
+    <div class="label">🗂 Build Task Object</div>
+    <div class="detail">id · timestamp · category · extractedData · OneDrive path</div>
+  </div>
+
+  <div class="arrow"></div>
+
+  <!-- SAVE FILE -->
+  <div class="section-badge">Step 4 — Save</div>
+  <div class="file-box">
+    <span class="file-icon">💾</span>
+    <div>
+      <strong>tasks_YYYY-MM-DD.json</strong><br>
+      <span style="color:#888;">Appends all tasks for the day · local record keeping</span>
+    </div>
+  </div>
+
+  <div class="arrow"></div>
+
+  <!-- DIGEST GENERATOR -->
+  <div class="section-badge">Step 5 — Generate Digest</div>
+  <div class="node blue">
+    <div class="label">📊 DigestEmailGenerator</div>
+    <div class="detail">Groups tasks: Type → Client Name<br>Renders professional HTML + plain text fallback</div>
+  </div>
+
+  <div class="arrow"></div>
+
+  <!-- SMTP SEND -->
+  <div class="section-badge">Step 6 — Send</div>
+  <div class="node green">
+    <div class="label">📤 SMTP Send (nodemailer)</div>
+    <div class="detail">mail.praeto.co.za : 587<br>From: jaden@praeto.co.za</div>
+  </div>
+
+  <div class="arrow"></div>
+
+  <!-- RECIPIENT -->
+  <div class="node" style="background: linear-gradient(135deg,#1e5a7a,#2a7ba8); color:#fff; width:380px;">
+    <div class="label">📥 Digest Delivered</div>
+    <div class="detail">
+      To: DIGEST_TO_EMAIL (.env)<br>
+      HTML digest grouped by task type · Skye CRM ready copy-paste
+    </div>
+  </div>
+
+</div>
+
+<!-- LEGEND -->
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#1e5a7a"></div> Connection / Delivery</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#334e68"></div> Processing step</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#2d7a4f"></div> Send email</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#E24B4A"></div> Claim</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#EF9F27"></div> Quote</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#639922"></div> Servicing</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#378ADD"></div> Follow-up</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f0a500"></div> Decision point</div>
+</div>
+
+<p style="text-align:center; margin-top:24px; font-size:11px; color:#bbb;">
+  Praeto Task Automation System &nbsp;·&nbsp; autoclassmail &nbsp;·&nbsp; Generated 2026-03-26
+</p>
+
+</body>
+</html>

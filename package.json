@@ -3,15 +3,23 @@
   "version": "1.0.0",
   "description": "Praeto Task Automation - reads cPanel emails, categorises tasks, sends daily digest",
   "main": "main.js",
-  "type": "module",
   "scripts": {
     "start": "node main.js",
     "daemon": "node main.js --daemon",
-    "pm2:start": "pm2 start main.js --name praeto-email --node-args='--experimental-vm-modules' -- --daemon",
+    "build": "pkg main.js --target node18-win-x64 --output dist/praeto-email.exe",
+    "pm2:start": "pm2 start main.js --name praeto-email -- --daemon",
     "pm2:stop": "pm2 stop praeto-email",
     "pm2:logs": "pm2 logs praeto-email",
     "pm2:status": "pm2 status",
-    "test:connection": "node test_mail_server.js"
+    "test:connection": "node test_mail_server.mjs"
+  },
+  "pkg": {
+    "assets": [
+      "praeto_automation_config_v2.json"
+    ],
+    "targets": [
+      "node18-win-x64"
+    ]
   },
   "keywords": [],
   "author": "",

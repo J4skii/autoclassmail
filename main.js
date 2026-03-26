@@ -4,37 +4,48 @@
  *
  * Usage:
  *   node main.js              - run once (fetch + send digest if tasks found)
- *   node main.js --daemon     - run continuously, digest at scheduled time
+ *   node main.js --daemon     - run continuously, check every 5 minutes
  */
 
-import 'dotenv/config';
-import Imap from 'imap';
-import { simpleParser } from 'mailparser';
-import nodemailer from 'nodemailer';
-import fs from 'fs';
-import { readFileSync } from 'fs';
+'use strict';
 
-// ── Load config ──────────────────────────────────────────────────────────────
-const config = JSON.parse(readFileSync('./praeto_automation_config_v2.json', 'utf8'));
+const path      = require('path');
+const fs        = require('fs');
+const Imap      = require('imap');
+const { simpleParser } = require('mailparser');
+const nodemailer = require('nodemailer');
+const DigestEmailGenerator = require('./digest_email_generator.js');
 
-// ── Validate required env vars ───────────────────────────────────────────────
+// ── Resolve base directory (works both via `node` and as a pkg .exe) ─────────
+const BASE_DIR = process.pkg
+  ? path.dirname(process.execPath)   // running as .exe
+  : process.cwd();                   // running via node
+
+// ── Load .env ─────────────────────────────────────────────────────────────────
+require('dotenv').config({ path: path.join(BASE_DIR, '.env') });
+
+// ── Load config ───────────────────────────────────────────────────────────────
+const configPath = path.join(BASE_DIR, 'praeto_automation_config_v2.json');
+const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+
+// ── Validate required env vars ────────────────────────────────────────────────
 const required = ['IMAP_HOST', 'IMAP_USER', 'IMAP_PASSWORD', 'SMTP_HOST', 'SMTP_USER', 'SMTP_PASSWORD'];
-const missing = required.filter(k => !process.env[k]);
+const missing  = required.filter(k => !process.env[k]);
 if (missing.length) {
   console.error(`❌ Missing required environment variables: ${missing.join(', ')}`);
-  console.error('   Copy .env.example to .env and fill in your credentials.');
+  console.error(`   Edit the .env file next to praeto-email.exe and fill in your credentials.`);
   process.exit(1);
 }
 
-// ── IMAP: fetch new/unseen emails ─────────────────────────────────────────────
+// ── IMAP: fetch unseen emails ─────────────────────────────────────────────────
 function fetchEmails() {
   return new Promise((resolve, reject) => {
     const imap = new Imap({
-      user: process.env.IMAP_USER,
+      user:    process.env.IMAP_USER,
       password: process.env.IMAP_PASSWORD,
-      host: process.env.IMAP_HOST,
-      port: parseInt(process.env.IMAP_PORT || '993'),
-      tls: true,
+      host:    process.env.IMAP_HOST,
+      port:    parseInt(process.env.IMAP_PORT || '993'),
+      tls:     true,
       tlsOptions: { rejectUnauthorized: false }
     });
 
@@ -64,12 +75,12 @@ function fetchEmails() {
               simpleParser(stream, (err, parsed) => {
                 if (!err) {
                   emails.push({
-                    id: seqno,
-                    subject: parsed.subject || '(no subject)',
-                    from: parsed.from?.text || '(unknown)',
-                    date: parsed.date,
-                    body: parsed.text || '',
-                    html: parsed.html || '',
+                    id:          seqno,
+                    subject:     parsed.subject || '(no subject)',
+                    from:        parsed.from ? parsed.from.text : '(unknown)',
+                    date:        parsed.date,
+                    body:        parsed.text || '',
+                    html:        parsed.html || '',
                     attachments: parsed.attachments || []
                   });
                 }
@@ -89,10 +100,11 @@ function fetchEmails() {
   });
 }
 
-// ── Email categorisation (from config keywords) ───────────────────────────────
+// ── Categorise by config keywords ─────────────────────────────────────────────
 function categorise(email) {
-  const text = `${email.subject} ${email.body}`.toLowerCase();
-  for (const [key, cat] of Object.entries(config.task_categories)) {
+  const text = (email.subject + ' ' + email.body).toLowerCase();
+  const categories = Object.entries(config.task_categories);
+  for (const [key, cat] of categories) {
     if (cat.keywords.some(kw => text.includes(kw.toLowerCase()))) return key;
   }
   return 'followup';
@@ -101,105 +113,95 @@ function categorise(email) {
 function extractField(text, patterns) {
   for (const p of patterns) {
     const m = text.match(new RegExp(p, 'i'));
-    if (m?.[1]) return m[1].trim();
+    if (m && m[1]) return m[1].trim();
   }
   return '-';
 }
 
 function buildTask(email) {
-  const text = `${email.subject} ${email.body}`;
-  const category = categorise(email);
-  const rules = config.extraction_rules;
-  const clientName = extractField(text, rules.clientNamePatterns) || 'Unknown Client';
-  const policyNumber = extractField(text, rules.policyNumberPatterns);
-  const claimReference = extractField(text, rules.claimReferencePatterns);
-
-  const folders = config.onedrive_structure.folders;
+  const text      = email.subject + ' ' + email.body;
+  const category  = categorise(email);
+  const rules     = config.extraction_rules;
+  const folders   = config.onedrive_structure.folders;
   const folderMap = { claim: folders.claims, quote: folders.quotes, servicing: folders.policies, followup: folders.followups };
+  const clientName = extractField(text, rules.clientNamePatterns) || 'Unknown Client';
 
   return {
-    id: Date.now() + Math.random(),
+    id:        Date.now() + Math.random(),
     timestamp: new Date().toISOString(),
-    from: email.from,
-    subject: email.subject,
+    from:      email.from,
+    subject:   email.subject,
     category,
-    status: 'processed',
+    status:    'processed',
     attachments: email.attachments.map(a => a.filename).filter(Boolean),
     extractedData: {
       clientName,
-      policyNumber,
-      claimReference,
-      description: email.body.substring(0, 200).trim(),
-      assignedRep: config.sales_representatives[0]?.name || 'Admin',
-      oneDrivePath: `${folderMap[category] || folders.claims}/${clientName}/`
+      policyNumber:   extractField(text, rules.policyNumberPatterns),
+      claimReference: extractField(text, rules.claimReferencePatterns),
+      description:    email.body.substring(0, 200).trim(),
+      assignedRep:    (config.sales_representatives[0] && config.sales_representatives[0].name) || 'Admin',
+      oneDrivePath:   (folderMap[category] || folders.claims) + '/' + clientName + '/'
     }
   };
 }
 
-// ── SMTP: send digest email ───────────────────────────────────────────────────
+// ── Send digest via SMTP ───────────────────────────────────────────────────────
 async function sendDigest(tasks) {
-  const { default: DigestEmailGenerator } = await import('./digest_email_generator.js');
   const generator = new DigestEmailGenerator(config.email_settings);
-  const toEmail = process.env.DIGEST_TO_EMAIL || config.admin_team[0].email;
+  const toEmail   = process.env.DIGEST_TO_EMAIL || config.admin_team[0].email;
   const emailData = generator.generateDigestEmail(toEmail, tasks);
 
   const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || '587'),
+    host:   process.env.SMTP_HOST,
+    port:   parseInt(process.env.SMTP_PORT || '587'),
     secure: parseInt(process.env.SMTP_PORT || '587') === 465,
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASSWORD
-    },
-    tls: { rejectUnauthorized: false }
+    auth:   { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD },
+    tls:    { rejectUnauthorized: false }
   });
 
   await transporter.sendMail({
-    from: `"${process.env.SMTP_FROM_NAME || 'Praeto Automation'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
-    to: toEmail,
+    from:    '"' + (process.env.SMTP_FROM_NAME || 'Praeto Automation') + '" <' + (process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER) + '>',
+    to:      toEmail,
     subject: emailData.subject,
-    html: emailData.html,
-    text: emailData.plain_text
+    html:    emailData.html,
+    text:    emailData.plain_text
   });
 
-  console.log(`✅ Digest sent to ${toEmail} — ${tasks.length} task(s)`);
+  console.log('✅ Digest sent to ' + toEmail + ' — ' + tasks.length + ' task(s)');
 }
 
-// ── Main run ──────────────────────────────────────────────────────────────────
+// ── Main run ───────────────────────────────────────────────────────────────────
 async function run() {
-  console.log(`\n[${new Date().toLocaleString('en-ZA')}] 🔄 Checking emails...\n`);
+  console.log('\n[' + new Date().toLocaleString('en-ZA') + '] 🔄 Checking emails...\n');
 
   const emails = await fetchEmails();
   if (emails.length === 0) return;
 
   const tasks = emails.map(buildTask);
 
-  // Log summary
   tasks.forEach(t => {
     const cat = config.task_categories[t.category];
-    console.log(`  ${cat.icon} [${t.category.toUpperCase()}] ${t.subject}`);
-    console.log(`     Client: ${t.extractedData.clientName}`);
+    console.log('  ' + cat.icon + ' [' + t.category.toUpperCase() + '] ' + t.subject);
+    console.log('     Client: ' + t.extractedData.clientName);
   });
 
-  // Save to file for record-keeping
-  const logFile = `tasks_${new Date().toISOString().split('T')[0]}.json`;
+  // Save daily log next to exe / cwd
+  const logFile = path.join(BASE_DIR, 'tasks_' + new Date().toISOString().split('T')[0] + '.json');
   const existing = fs.existsSync(logFile) ? JSON.parse(fs.readFileSync(logFile)) : [];
-  fs.writeFileSync(logFile, JSON.stringify([...existing, ...tasks], null, 2));
-  console.log(`\n💾 Tasks appended to ${logFile}`);
+  fs.writeFileSync(logFile, JSON.stringify(existing.concat(tasks), null, 2));
+  console.log('\n💾 Tasks saved to ' + logFile);
 
-  // Send digest
   await sendDigest(tasks);
 }
 
-// ── Daemon mode (continuous) vs one-shot ─────────────────────────────────────
+// ── Daemon vs one-shot ─────────────────────────────────────────────────────────
 const isDaemon = process.argv.includes('--daemon');
 
 if (isDaemon) {
-  const CHECK_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
-  console.log('🚀 Praeto Automation running in daemon mode');
-  console.log(`   Checking every 5 minutes. Digest sent immediately when new emails arrive.\n`);
-  run().catch(console.error); // run once immediately
-  setInterval(() => run().catch(console.error), CHECK_INTERVAL_MS);
+  const INTERVAL = 5 * 60 * 1000;
+  console.log('🚀 Praeto Automation running in daemon mode (every 5 min)\n');
+  run().catch(console.error);
+  setInterval(() => run().catch(console.error), INTERVAL);
 } else {
   run().then(() => {
     console.log('\nDone.');

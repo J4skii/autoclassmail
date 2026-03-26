@@ -733,4 +733,4 @@ Questions? Reply to this email.
 }
 
 // Export for use in main automation system
-export default DigestEmailGenerator;
+module.exports = DigestEmailGenerator;
