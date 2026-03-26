@@ -1,17 +1,25 @@
 {
-  "name": "emailauto-v01",
+  "name": "praeto-email-automation",
   "version": "1.0.0",
-  "description": "",
-  "main": "digest_email_generator.js",
+  "description": "Praeto Task Automation - reads cPanel emails, categorises tasks, sends daily digest",
+  "main": "main.js",
+  "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node main.js",
+    "daemon": "node main.js --daemon",
+    "pm2:start": "pm2 start main.js --name praeto-email --node-args='--experimental-vm-modules' -- --daemon",
+    "pm2:stop": "pm2 stop praeto-email",
+    "pm2:logs": "pm2 logs praeto-email",
+    "pm2:status": "pm2 status",
+    "test:connection": "node test_mail_server.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "module",
   "dependencies": {
+    "dotenv": "^16.4.5",
     "imap": "^0.8.19",
-    "mailparser": "^3.9.6"
+    "mailparser": "^3.9.6",
+    "nodemailer": "^6.9.14"
   }
 }

@@ -1,3 +1,5 @@
 node_modules/
 *.log
 real_emails.json
+tasks_*.json
+.env
