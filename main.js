@@ -1,110 +1,189 @@
+'use strict';
+
 /**
  * PRAETO TASK AUTOMATION SYSTEM
  * Production Entry Point
  *
  * Usage:
- *   node main.js              - run once (fetch + send digest if tasks found)
- *   node main.js --daemon     - run continuously, check every 5 minutes
+ *   node main.js              - run once (scan today's mail, send digest)
+ *   node main.js --daemon     - persistent IMAP connection, reacts to new mail
  */
 
-'use strict';
-
-const path      = require('path');
-const fs        = require('fs');
-const Imap      = require('imap');
+const path       = require('path');
+const fs         = require('fs');
+const Imap       = require('imap');
 const { simpleParser } = require('mailparser');
 const nodemailer = require('nodemailer');
 const DigestEmailGenerator = require('./digest_email_generator.js');
 
-// ── Resolve base directory (works both via `node` and as a pkg .exe) ─────────
-const BASE_DIR = process.pkg
-  ? path.dirname(process.execPath)   // running as .exe
-  : process.cwd();                   // running via node
+// ── Base directory (works via `node` and as a pkg .exe) ──────────────────────
+const BASE_DIR = process.pkg ? path.dirname(process.execPath) : process.cwd();
 
-// ── Load .env ─────────────────────────────────────────────────────────────────
+// ── Load .env ────────────────────────────────────────────────────────────────
 require('dotenv').config({ path: path.join(BASE_DIR, '.env') });
 
-// ── Load config ───────────────────────────────────────────────────────────────
-const configPath = path.join(BASE_DIR, 'praeto_automation_config_v2.json');
-const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+// ── Load config ──────────────────────────────────────────────────────────────
+const config = JSON.parse(fs.readFileSync(path.join(BASE_DIR, 'praeto_automation_config_v2.json'), 'utf8'));
 
-// ── Validate required env vars ────────────────────────────────────────────────
-const required = ['IMAP_HOST', 'IMAP_USER', 'IMAP_PASSWORD', 'SMTP_HOST', 'SMTP_USER', 'SMTP_PASSWORD'];
-const missing  = required.filter(k => !process.env[k]);
+// ── Validate required env vars ───────────────────────────────────────────────
+const REQUIRED_VARS = ['IMAP_HOST', 'IMAP_USER', 'IMAP_PASSWORD', 'SMTP_HOST', 'SMTP_USER', 'SMTP_PASSWORD'];
+const missing = REQUIRED_VARS.filter(k => !process.env[k]);
 if (missing.length) {
   console.error(`❌ Missing required environment variables: ${missing.join(', ')}`);
-  console.error(`   Edit the .env file next to praeto-email.exe and fill in your credentials.`);
+  console.error('   Edit the .env file and fill in your credentials.');
   process.exit(1);
 }
 
-// ── IMAP: fetch unseen emails ─────────────────────────────────────────────────
-function fetchEmails() {
-  return new Promise((resolve, reject) => {
-    const imap = new Imap({
-      user:    process.env.IMAP_USER,
-      password: process.env.IMAP_PASSWORD,
-      host:    process.env.IMAP_HOST,
-      port:    parseInt(process.env.IMAP_PORT || '993'),
-      tls:     true,
-      tlsOptions: { rejectUnauthorized: false }
-    });
+// ── Timezone helpers (Africa/Johannesburg) ───────────────────────────────────
+const TZ = 'Africa/Johannesburg';
 
-    const emails = [];
+function nowSAST() {
+  return new Date().toLocaleString('en-ZA', { timeZone: TZ });
+}
 
-    imap.once('ready', () => {
-      imap.openBox('INBOX', false, (err, box) => {
-        if (err) { imap.end(); return reject(err); }
+function todayDateStrSAST() {
+  return new Date().toLocaleDateString('en-ZA', { timeZone: TZ })
+    .split('/').reverse().join('-'); // → YYYY-MM-DD
+}
 
-        console.log(`📬 Inbox: ${box.messages.total} total, checking for UNSEEN...`);
+// ── Log file management ──────────────────────────────────────────────────────
+const LOG_MAX_DAYS  = 30;
+const LOG_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+const LOG_MAX_ENTRIES = 500;
 
-        imap.search(['UNSEEN'], (err, results) => {
-          if (err) { imap.end(); return reject(err); }
+function cleanupLogs() {
+  const cutoff = Date.now() - LOG_MAX_DAYS * 24 * 60 * 60 * 1000;
+  try {
+    const files = fs.readdirSync(BASE_DIR)
+      .filter(f => /^tasks_\d{4}-\d{2}-\d{2}\.json$/.test(f));
 
-          if (!results || results.length === 0) {
-            console.log('   No new emails.');
-            imap.end();
-            return resolve([]);
-          }
+    let deleted = 0;
+    for (const file of files) {
+      const fullPath = path.join(BASE_DIR, file);
+      const stat = fs.statSync(fullPath);
 
-          console.log(`   Found ${results.length} unseen email(s).`);
-          const f = imap.fetch(results, { bodies: '', markSeen: true });
-          let pending = results.length;
+      if (stat.mtimeMs < cutoff) {
+        fs.unlinkSync(fullPath);
+        deleted++;
+        continue;
+      }
 
-          f.on('message', (msg, seqno) => {
-            msg.on('body', stream => {
-              simpleParser(stream, (err, parsed) => {
-                if (!err) {
-                  emails.push({
-                    id:          seqno,
-                    subject:     parsed.subject || '(no subject)',
-                    from:        parsed.from ? parsed.from.text : '(unknown)',
-                    date:        parsed.date,
-                    body:        parsed.text || '',
-                    html:        parsed.html || '',
-                    attachments: parsed.attachments || []
-                  });
-                }
-                if (--pending === 0) imap.end();
-              });
-            });
-          });
+      if (stat.size > LOG_MAX_BYTES) {
+        try {
+          const data = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
+          const trimmed = data.slice(-LOG_MAX_ENTRIES);
+          fs.writeFileSync(fullPath, JSON.stringify(trimmed, null, 2));
+          console.log(`⚠️  ${file} exceeded 5 MB — trimmed to last ${LOG_MAX_ENTRIES} entries`);
+        } catch (e) {
+          console.error(`⚠️  Could not trim ${file}: ${e.message}`);
+        }
+      }
+    }
 
-          f.once('error', reject);
-        });
-      });
-    });
+    if (deleted > 0) console.log(`🧹 Removed ${deleted} log file(s) older than ${LOG_MAX_DAYS} days`);
+  } catch (e) {
+    console.error('⚠️  Log cleanup failed:', e.message);
+  }
+}
 
-    imap.once('error', reject);
-    imap.once('end', () => resolve(emails));
-    imap.connect();
+function appendToLog(tasks) {
+  const logFile = path.join(BASE_DIR, `tasks_${todayDateStrSAST()}.json`);
+  try {
+    const existing = fs.existsSync(logFile)
+      ? JSON.parse(fs.readFileSync(logFile, 'utf8'))
+      : [];
+    fs.writeFileSync(logFile, JSON.stringify(existing.concat(tasks), null, 2));
+    console.log(`💾 Tasks saved to ${path.basename(logFile)}`);
+  } catch (e) {
+    console.error(`⚠️  Could not write log file: ${e.message}`);
+  }
+}
+
+// ── IMAP helpers ─────────────────────────────────────────────────────────────
+function createIMAPClient() {
+  return new Imap({
+    user:     process.env.IMAP_USER,
+    password: process.env.IMAP_PASSWORD,
+    host:     process.env.IMAP_HOST,
+    port:     parseInt(process.env.IMAP_PORT || '993'),
+    tls:      true,
+    tlsOptions: { rejectUnauthorized: false },
+    keepalive: {
+      interval:     10000,  // send NOOP every 10 s to keep connection alive
+      idleInterval: 300000, // re-enter IDLE every 5 min
+      forceNoop:    true    // use NOOP if server doesn't support IDLE
+    }
   });
 }
 
-// ── Categorise by config keywords ─────────────────────────────────────────────
+/**
+ * Fetch all emails received today (SAST midnight onwards).
+ * Does NOT mark any message as seen.
+ */
+function fetchTodaysEmails(imap) {
+  return new Promise((resolve) => {
+    const todayMidnight = new Date();
+    todayMidnight.setHours(0, 0, 0, 0);
+
+    imap.search([['SINCE', todayMidnight]], (err, results) => {
+      if (err) {
+        console.error('⚠️  IMAP search error:', err.message);
+        return resolve([]);
+      }
+
+      if (!results || results.length === 0) {
+        console.log('   No emails found for today.');
+        return resolve([]);
+      }
+
+      console.log(`   Found ${results.length} email(s) for today.`);
+
+      const emails  = [];
+      const f       = imap.fetch(results, { bodies: '' }); // no markSeen
+      let   pending = results.length;
+
+      function done() {
+        if (--pending === 0) resolve(emails);
+      }
+
+      f.on('message', (msg, seqno) => {
+        msg.on('body', stream => {
+          simpleParser(stream, (parseErr, parsed) => {
+            if (parseErr) {
+              console.error(`⚠️  Email #${seqno} could not be parsed: ${parseErr.message}`);
+            } else {
+              emails.push({
+                id:          seqno,
+                subject:     parsed.subject  || '(no subject)',
+                from:        parsed.from ? parsed.from.text : '(unknown)',
+                date:        parsed.date,
+                body:        parsed.text     || '',
+                html:        parsed.html     || '',
+                attachments: parsed.attachments || []
+              });
+            }
+            done();
+          });
+        });
+
+        msg.on('error', msgErr => {
+          console.error(`⚠️  Message stream error #${seqno}: ${msgErr.message}`);
+          done();
+        });
+      });
+
+      f.on('error', fetchErr => {
+        console.error('⚠️  Fetch error:', fetchErr.message);
+        resolve(emails); // return what we have so far
+      });
+    });
+  });
+}
+
+// ── Email processing ─────────────────────────────────────────────────────────
 function categorise(email) {
   const text = (email.subject + ' ' + email.body).toLowerCase();
-  const categories = Object.entries(config.task_categories);
-  for (const [key, cat] of categories) {
+  for (const [key, cat] of Object.entries(config.task_categories)) {
     if (cat.keywords.some(kw => text.includes(kw.toLowerCase()))) return key;
   }
   return 'followup';
@@ -112,8 +191,12 @@ function categorise(email) {
 
 function extractField(text, patterns) {
   for (const p of patterns) {
-    const m = text.match(new RegExp(p, 'i'));
-    if (m && m[1]) return m[1].trim();
+    try {
+      const m = text.match(new RegExp(p, 'i'));
+      if (m && m[1]) return m[1].trim();
+    } catch (e) {
+      console.error(`⚠️  Invalid extraction pattern "${p}": ${e.message}`);
+    }
   }
   return '-';
 }
@@ -123,12 +206,17 @@ function buildTask(email) {
   const category  = categorise(email);
   const rules     = config.extraction_rules;
   const folders   = config.onedrive_structure.folders;
-  const folderMap = { claim: folders.claims, quote: folders.quotes, servicing: folders.policies, followup: folders.followups };
+  const folderMap = {
+    claim:     folders.claims,
+    quote:     folders.quotes,
+    servicing: folders.policies,
+    followup:  folders.followups
+  };
   const clientName = extractField(text, rules.clientNamePatterns) || 'Unknown Client';
 
   return {
-    id:        Date.now() + Math.random(),
-    timestamp: new Date().toISOString(),
+    id:        `${email.id}-${Date.now()}`,
+    timestamp: new Date().toLocaleString('en-ZA', { timeZone: TZ }),
     from:      email.from,
     subject:   email.subject,
     category,
@@ -145,7 +233,7 @@ function buildTask(email) {
   };
 }
 
-// ── Send digest via SMTP ───────────────────────────────────────────────────────
+// ── SMTP digest sender ───────────────────────────────────────────────────────
 async function sendDigest(tasks) {
   const generator = new DigestEmailGenerator(config.email_settings);
   const toEmail   = process.env.DIGEST_TO_EMAIL || config.admin_team[0].email;
@@ -160,54 +248,162 @@ async function sendDigest(tasks) {
   });
 
   await transporter.sendMail({
-    from:    '"' + (process.env.SMTP_FROM_NAME || 'Praeto Automation') + '" <' + (process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER) + '>',
+    from:    `"${process.env.SMTP_FROM_NAME || 'Praeto Automation'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
     to:      toEmail,
     subject: emailData.subject,
     html:    emailData.html,
     text:    emailData.plain_text
   });
 
-  console.log('✅ Digest sent to ' + toEmail + ' — ' + tasks.length + ' task(s)');
+  console.log(`✅ Digest sent to ${toEmail} — ${tasks.length} task(s)`);
 }
 
-// ── Main run ───────────────────────────────────────────────────────────────────
-async function run() {
-  console.log('\n[' + new Date().toLocaleString('en-ZA') + '] 🔄 Checking emails...\n');
+// ── Main processing run ───────────────────────────────────────────────────────
+// processedIds tracks emails already handled today so we don't double-digest.
+const processedIds = new Set();
+let   currentDay  = todayDateStrSAST();
 
-  const emails = await fetchEmails();
-  if (emails.length === 0) return;
+function rolloverIfNewDay() {
+  const today = todayDateStrSAST();
+  if (today !== currentDay) {
+    console.log(`\n🌅 New day (${today}) — resetting processed email tracker`);
+    processedIds.clear();
+    currentDay = today;
+    cleanupLogs();
+    return true;
+  }
+  return false;
+}
 
-  const tasks = emails.map(buildTask);
+async function processNewEmails(imap) {
+  rolloverIfNewDay();
+  console.log(`\n[${nowSAST()}] 🔄 Scanning today's inbox...\n`);
+
+  const allToday = await fetchTodaysEmails(imap);
+  const newOnes  = allToday.filter(e => !processedIds.has(e.id));
+
+  if (newOnes.length === 0) {
+    console.log('   Nothing new to process.');
+    return;
+  }
+
+  console.log(`   Processing ${newOnes.length} new email(s):\n`);
+
+  const tasks = newOnes.map(e => {
+    processedIds.add(e.id);
+    return buildTask(e);
+  });
 
   tasks.forEach(t => {
     const cat = config.task_categories[t.category];
-    console.log('  ' + cat.icon + ' [' + t.category.toUpperCase() + '] ' + t.subject);
-    console.log('     Client: ' + t.extractedData.clientName);
+    console.log(`  ${cat.icon} [${t.category.toUpperCase()}] ${t.subject}`);
+    console.log(`     Client: ${t.extractedData.clientName}`);
   });
 
-  // Save daily log next to exe / cwd
-  const logFile = path.join(BASE_DIR, 'tasks_' + new Date().toISOString().split('T')[0] + '.json');
-  const existing = fs.existsSync(logFile) ? JSON.parse(fs.readFileSync(logFile)) : [];
-  fs.writeFileSync(logFile, JSON.stringify(existing.concat(tasks), null, 2));
-  console.log('\n💾 Tasks saved to ' + logFile);
+  appendToLog(tasks);
 
-  await sendDigest(tasks);
+  try {
+    await sendDigest(tasks);
+  } catch (e) {
+    console.error(`❌ Failed to send digest: ${e.message}`);
+  }
 }
 
-// ── Daemon vs one-shot ─────────────────────────────────────────────────────────
-const isDaemon = process.argv.includes('--daemon');
+// ── Daemon: persistent IMAP connection ──────────────────────────────────────
+let reconnectTimer = null;
 
-if (isDaemon) {
-  const INTERVAL = 5 * 60 * 1000;
-  console.log('🚀 Praeto Automation running in daemon mode (every 5 min)\n');
-  run().catch(console.error);
-  setInterval(() => run().catch(console.error), INTERVAL);
-} else {
-  run().then(() => {
-    console.log('\nDone.');
-    process.exit(0);
-  }).catch(err => {
-    console.error('❌ Fatal error:', err.message);
+function startDaemon() {
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+
+  console.log(`\n[${nowSAST()}] 📡 Connecting to IMAP (persistent)...`);
+  const imap = createIMAPClient();
+
+  imap.once('ready', () => {
+    console.log(`✅ Connected to ${process.env.IMAP_HOST}`);
+
+    imap.openBox('INBOX', true, (err, box) => { // readOnly = true (we never change flags)
+      if (err) {
+        console.error('❌ Cannot open INBOX:', err.message);
+        scheduleReconnect();
+        return;
+      }
+
+      console.log(`📬 INBOX open — ${box.messages.total} message(s) in mailbox\n`);
+
+      // Initial scan on connect
+      processNewEmails(imap).catch(e => console.error('❌ Initial scan error:', e.message));
+
+      // React to new mail as it arrives (server pushes this via IMAP IDLE)
+      imap.on('mail', numNew => {
+        console.log(`\n📨 Server notified: ${numNew} new message(s) arrived`);
+        processNewEmails(imap).catch(e => console.error('❌ New mail scan error:', e.message));
+      });
+    });
+  });
+
+  imap.on('error', err => {
+    console.error(`❌ IMAP connection error: ${err.message}`);
+    scheduleReconnect();
+  });
+
+  imap.on('end', () => {
+    console.warn('⚠️  IMAP connection closed unexpectedly');
+    scheduleReconnect();
+  });
+
+  imap.connect();
+}
+
+function scheduleReconnect() {
+  const delaySec = 30;
+  console.log(`🔁 Reconnecting in ${delaySec}s...`);
+  reconnectTimer = setTimeout(startDaemon, delaySec * 1000);
+}
+
+// ── One-shot mode ────────────────────────────────────────────────────────────
+function runOnce() {
+  const imap = createIMAPClient();
+
+  imap.once('ready', () => {
+    imap.openBox('INBOX', true, async (err) => {
+      if (err) {
+        console.error('❌ Cannot open INBOX:', err.message);
+        imap.end();
+        process.exit(1);
+      }
+      try {
+        await processNewEmails(imap);
+      } catch (e) {
+        console.error('❌ Fatal error:', e.message);
+      } finally {
+        imap.end();
+      }
+    });
+  });
+
+  imap.once('error', err => {
+    console.error('❌ IMAP error:', err.message);
     process.exit(1);
   });
+
+  imap.once('end', () => {
+    console.log('\nDone.');
+    process.exit(0);
+  });
+
+  imap.connect();
+}
+
+// ── Entry point ──────────────────────────────────────────────────────────────
+const isDaemon = process.argv.includes('--daemon');
+
+cleanupLogs(); // always clean up old logs on start
+
+if (isDaemon) {
+  console.log('🚀 Praeto Automation — daemon mode');
+  console.log('   Single persistent IMAP connection · reacts to new mail instantly\n');
+  startDaemon();
+} else {
+  console.log('🚀 Praeto Automation — one-shot mode\n');
+  runOnce();
 }

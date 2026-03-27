@@ -1,15 +1,22 @@
 import Imap from 'imap';
 import { simpleParser } from 'mailparser';
 import fs from 'fs';
+import dotenv from 'dotenv';
+dotenv.config();
 
 console.log('📧 Connecting to cPanel Email via IMAP...\n');
 
+if (!process.env.IMAP_USER || !process.env.IMAP_PASSWORD || !process.env.IMAP_HOST) {
+  console.error('❌ Missing IMAP credentials in .env (IMAP_HOST, IMAP_USER, IMAP_PASSWORD)');
+  process.exit(1);
+}
+
 const imap = new Imap({
-  user: 'jaden@praeto.co.za',
-  password: 'J@d3nPr@3to',
-  host: 'mail.praeto.co.za',
-  port: 993,
-  tls: true,
+  user:     process.env.IMAP_USER,
+  password: process.env.IMAP_PASSWORD,
+  host:     process.env.IMAP_HOST,
+  port:     parseInt(process.env.IMAP_PORT || '993'),
+  tls:      true,
   tlsOptions: { rejectUnauthorized: false }
 });
 

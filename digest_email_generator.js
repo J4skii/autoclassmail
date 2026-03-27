@@ -73,11 +73,12 @@ class DigestEmailGenerator {
    * Generate email subject line
    */
   generateSubject() {
-    const today = new Date().toLocaleDateString('en-ZA', { 
-      weekday: 'short', 
-      year: 'numeric', 
-      month: 'short', 
-      day: 'numeric' 
+    const today = new Date().toLocaleDateString('en-ZA', {
+      timeZone: 'Africa/Johannesburg',
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
     });
     return `Praeto Daily Task Digest - ${today}`;
   }
@@ -441,19 +442,28 @@ class DigestEmailGenerator {
    * Generate header section with greeting and stats
    */
   getHeaderSection(stats) {
-    const today = new Date().toLocaleDateString('en-ZA', { 
-      weekday: 'long', 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
+    const now = new Date();
+    const today = now.toLocaleDateString('en-ZA', {
+      timeZone: 'Africa/Johannesburg',
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
     });
+
+    const hourSAST = parseInt(now.toLocaleString('en-ZA', {
+      timeZone: 'Africa/Johannesburg',
+      hour: 'numeric',
+      hour12: false
+    }));
+    const greeting = hourSAST < 12 ? 'Good morning' : hourSAST < 17 ? 'Good afternoon' : 'Good evening';
 
     return `
     <div class="header">
         <div class="header-title">📊 Praeto Daily Task Digest</div>
-        <div class="header-subtitle">${today}</div>
+        <div class="header-subtitle">${today} &nbsp;·&nbsp; SAST</div>
     </div>
-    
+
     <div class="stats-container">
         <div class="stat-item">
             <span class="stat-number">${stats.total}</span>
@@ -472,12 +482,12 @@ class DigestEmailGenerator {
             <span class="stat-label">Files</span>
         </div>
     </div>
-    
+
     <div class="content">
         <div class="greeting">
-            Good afternoon!<br>
+            ${greeting}!<br>
             <br>
-            Below is your daily summary of processed tasks from your monitored inboxes. 
+            Below is your summary of processed tasks from your monitored inbox.
             Each task is ready to copy-paste directly into Skye CRM.
         </div>
     `;
@@ -615,9 +625,10 @@ Assigned: ${data.assignedRep}
     const nextDigestTime = this.config.digestTime || '16:15';
     const today = new Date();
     const nextDay = new Date(today.getTime() + 24 * 60 * 60 * 1000);
-    const nextDigestDate = nextDay.toLocaleDateString('en-ZA', { 
-      month: 'short', 
-      day: 'numeric' 
+    const nextDigestDate = nextDay.toLocaleDateString('en-ZA', {
+      timeZone: 'Africa/Johannesburg',
+      month: 'short',
+      day: 'numeric'
     });
 
     return `
