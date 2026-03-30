@@ -23,7 +23,14 @@ const BASE_DIR = process.pkg ? path.dirname(process.execPath) : process.cwd();
 require('dotenv').config({ path: path.join(BASE_DIR, '.env') });
 
 // ── Load config ──────────────────────────────────────────────────────────────
-const config = JSON.parse(fs.readFileSync(path.join(BASE_DIR, 'praeto_automation_config_v2.json'), 'utf8'));
+let config;
+try {
+  config = JSON.parse(fs.readFileSync(path.join(BASE_DIR, 'praeto_automation_config_v2.json'), 'utf8'));
+} catch (e) {
+  console.error('FATAL: Cannot load praeto_automation_config_v2.json —', e.message);
+  console.error('       Check that the file exists next to the .exe and contains valid JSON.');
+  process.exit(1);
+}
 
 // ── Validate required env vars ───────────────────────────────────────────────
 const REQUIRED_VARS = ['IMAP_HOST', 'IMAP_USER', 'IMAP_PASSWORD', 'SMTP_HOST', 'SMTP_USER', 'SMTP_PASSWORD'];
@@ -33,6 +40,24 @@ if (missing.length) {
   console.error('   Edit the .env file and fill in your credentials.');
   process.exit(1);
 }
+
+// ── Global safety net ────────────────────────────────────────────────────────
+// Catches any error that escapes all other try/catch blocks.
+// uncaughtException exits with code 1 so Task Scheduler can restart the process.
+// unhandledRejection stays alive — async rejections in the mail handler are often transient.
+process.on('uncaughtException', (err) => {
+  console.error(`[FATAL] uncaughtException: ${err.message}`);
+  console.error(err.stack);
+  sendAdminAlert('Process crash — uncaughtException', err.message)
+    .finally(() => process.exit(1));
+});
+
+process.on('unhandledRejection', (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.error(`[FATAL] unhandledRejection: ${msg}`);
+  sendAdminAlert('Unhandled promise rejection', msg).catch(() => {});
+  // intentionally no process.exit — daemon continues for transient failures
+});
 
 // ── Timezone helpers (Africa/Johannesburg) ───────────────────────────────────
 const TZ = 'Africa/Johannesburg';
@@ -233,11 +258,52 @@ function buildTask(email) {
   };
 }
 
+// ── Admin alert sender ───────────────────────────────────────────────────────
+// Sends a plain-text alert to ops on critical failures.
+// MUST NEVER THROW — called from error handlers. All errors are swallowed internally.
+const ALERT_TO = process.env.ALERT_EMAIL || process.env.SMTP_USER;
+
+async function sendAdminAlert(subject, detail) {
+  if (!ALERT_TO) return;
+  try {
+    const t = nodemailer.createTransport({
+      host:               process.env.SMTP_HOST,
+      port:               parseInt(process.env.SMTP_PORT || '587'),
+      secure:             parseInt(process.env.SMTP_PORT || '587') === 465,
+      auth:               { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD },
+      tls:                { rejectUnauthorized: false },
+      connectionTimeout:  10000,
+      greetingTimeout:    10000,
+      socketTimeout:      10000
+    });
+    await t.sendMail({
+      from:    `"Praeto Automation ALERT" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      to:      ALERT_TO,
+      subject: `[PRAETO ALERT] ${subject}`,
+      text:    [
+        'Alert from: Praeto Email Automation',
+        `Time (SAST): ${nowSAST()}`,
+        '',
+        `Issue: ${subject}`,
+        '',
+        'Detail:',
+        detail,
+        '',
+        '--- The system will attempt to self-recover. No action required unless this repeats. ---'
+      ].join('\n')
+    });
+    console.log(`[${nowSAST()}] 🔔 Admin alert sent to ${ALERT_TO}: ${subject}`);
+  } catch (alertErr) {
+    console.error(`[${nowSAST()}] ⚠️  Could not send admin alert: ${alertErr.message}`);
+  }
+}
+
 // ── SMTP digest sender ───────────────────────────────────────────────────────
-async function sendDigest(tasks) {
-  const generator = new DigestEmailGenerator(config.email_settings);
-  const toEmail   = process.env.DIGEST_TO_EMAIL || config.admin_team[0].email;
-  const emailData = generator.generateDigestEmail(toEmail, tasks);
+async function sendDigest(tasks, attempt = 1) {
+  const MAX_RETRIES = (config.email_settings && config.email_settings.maxRetries) || 3;
+  const toEmail     = process.env.DIGEST_TO_EMAIL || config.admin_team[0].email;
+  const generator   = new DigestEmailGenerator(config.email_settings);
+  const emailData   = generator.generateDigestEmail(toEmail, tasks);
 
   const transporter = nodemailer.createTransport({
     host:   process.env.SMTP_HOST,
@@ -247,15 +313,28 @@ async function sendDigest(tasks) {
     tls:    { rejectUnauthorized: false }
   });
 
-  await transporter.sendMail({
-    from:    `"${process.env.SMTP_FROM_NAME || 'Praeto Automation'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
-    to:      toEmail,
-    subject: emailData.subject,
-    html:    emailData.html,
-    text:    emailData.plain_text
-  });
-
-  console.log(`✅ Digest sent to ${toEmail} — ${tasks.length} task(s)`);
+  try {
+    await transporter.sendMail({
+      from:    `"${process.env.SMTP_FROM_NAME || 'Praeto Automation'}" <${process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER}>`,
+      to:      toEmail,
+      subject: emailData.subject,
+      html:    emailData.html,
+      text:    emailData.plain_text
+    });
+    console.log(`[${nowSAST()}] ✅ Digest sent to ${toEmail} — ${tasks.length} task(s)`);
+  } catch (err) {
+    console.error(`[${nowSAST()}] ❌ Digest send failed (attempt ${attempt}/${MAX_RETRIES}): ${err.message}`);
+    if (attempt < MAX_RETRIES) {
+      const delayMs = Math.pow(2, attempt) * 1000; // 2s, 4s, 8s
+      console.log(`   Retrying in ${delayMs / 1000}s...`);
+      await new Promise(r => setTimeout(r, delayMs));
+      return sendDigest(tasks, attempt + 1);
+    }
+    const lostMsg = `Digest delivery failed after ${MAX_RETRIES} attempts. ${tasks.length} task(s) affected. SMTP error: ${err.message}`;
+    console.error(`[${nowSAST()}] ❌ DIGEST LOST — ${lostMsg}`);
+    await sendAdminAlert('Digest delivery failure', lostMsg).catch(() => {});
+    throw err;
+  }
 }
 
 // ── Main processing run ───────────────────────────────────────────────────────
@@ -302,23 +381,39 @@ async function processNewEmails(imap) {
 
   appendToLog(tasks);
 
+  // Verify IMAP is still authenticated before sending — guards against mid-flight reconnects
+  if (!activeImap || activeImap.state !== 'authenticated') {
+    console.warn(`[${nowSAST()}] ⚠️  IMAP not authenticated — skipping digest until connection is restored`);
+    return;
+  }
+
   try {
     await sendDigest(tasks);
   } catch (e) {
-    console.error(`❌ Failed to send digest: ${e.message}`);
+    console.error(`[${nowSAST()}] ❌ Failed to send digest: ${e.message}`);
   }
 }
 
 // ── Daemon: persistent IMAP connection ──────────────────────────────────────
-let reconnectTimer = null;
+let reconnectTimer   = null;
+let activeImap       = null;
+let reconnectAttempts = 0;
 
 function startDaemon() {
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
 
+  // Destroy previous socket before creating a new one — prevents accumulation
+  if (activeImap) {
+    try { activeImap.destroy(); } catch (_) {}
+    activeImap = null;
+  }
+
   console.log(`\n[${nowSAST()}] 📡 Connecting to IMAP (persistent)...`);
   const imap = createIMAPClient();
+  activeImap = imap;
 
   imap.once('ready', () => {
+    reconnectAttempts = 0; // reset backoff counter on successful connect
     console.log(`✅ Connected to ${process.env.IMAP_HOST}`);
 
     imap.openBox('INBOX', true, (err, box) => { // readOnly = true (we never change flags)
@@ -355,9 +450,19 @@ function startDaemon() {
 }
 
 function scheduleReconnect() {
-  const delaySec = 30;
-  console.log(`🔁 Reconnecting in ${delaySec}s...`);
-  reconnectTimer = setTimeout(startDaemon, delaySec * 1000);
+  reconnectAttempts++;
+  const delayMs  = Math.min(5000 * Math.pow(2, reconnectAttempts - 1), 10 * 60 * 1000);
+  const delaySec = Math.round(delayMs / 1000);
+  console.log(`🔁 Reconnecting in ${delaySec}s (attempt ${reconnectAttempts})...`);
+
+  if (reconnectAttempts === 5) {
+    sendAdminAlert(
+      'IMAP connection lost — repeated failures',
+      `Failed to reconnect ${reconnectAttempts} times. Target: ${process.env.IMAP_HOST}. Will keep retrying (next delay: ${delaySec}s).`
+    ).catch(() => {});
+  }
+
+  reconnectTimer = setTimeout(startDaemon, delayMs);
 }
 
 // ── One-shot mode ────────────────────────────────────────────────────────────
@@ -393,6 +498,23 @@ function runOnce() {
 
   imap.connect();
 }
+
+// ── Graceful shutdown ────────────────────────────────────────────────────────
+// Handles SIGINT (Ctrl-C in dev) and SIGTERM (service managers, future NSSM/pm2).
+// Note: Windows Task Scheduler uses TerminateProcess() on stop — SIGTERM is not sent,
+// but this handler works correctly in all other contexts with zero future changes needed.
+function gracefulShutdown(signal) {
+  console.log(`\n[${nowSAST()}] ${signal} received — shutting down cleanly...`);
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  if (activeImap) {
+    try { activeImap.end(); } catch (_) {}
+    activeImap = null;
+    console.log('   IMAP connection closed.');
+  }
+  setTimeout(() => { console.log('   Shutdown complete.'); process.exit(0); }, 5000);
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
 
 // ── Entry point ──────────────────────────────────────────────────────────────
 const isDaemon = process.argv.includes('--daemon');
